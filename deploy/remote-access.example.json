@@ -1,0 +1,5 @@
+{
+  "frontend_url": "https://YOUR_PROJECT.vercel.app",
+  "allowed_origins": ["https://YOUR_PROJECT.vercel.app"],
+  "vercel_command": ["node", "C:/PATH/TO/vercel/dist/index.js"]
+}
