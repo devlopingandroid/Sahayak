@@ -25,6 +25,11 @@ def healthy():
 
 def main():
     config=json.loads(CONFIG.read_text())
+    if config.get('backend_mode')=='cloud':
+        import webbrowser
+        print('SAHAYAK uses the cloud backend. Opening the online dashboard.',flush=True)
+        webbrowser.open(config['frontend_url'])
+        return
     backend=None
     tunnel=None
     hidden={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}

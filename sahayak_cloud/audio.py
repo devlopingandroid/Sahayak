@@ -61,7 +61,7 @@ class Audio:
         except queue.Full:
             raise ValueError('Speaker queue is busy. Please wait.')
 
-    def listen(self, language='en-IN'):
+    def listen(self, language='en-IN', short_phrase=False):
         if not self.lock.acquire(blocking=False):
             raise ValueError('Laptop audio is busy. Wait until the spoken answer finishes.')
         try:
@@ -71,7 +71,12 @@ class Audio:
             recognizer = sr.Recognizer()
             recognizer.operation_timeout = 15
             with sr.Microphone() as source:
-                recognizer.adjust_for_ambient_noise(source, duration=.5)
+                # A single spoken name can finish during ambient calibration.
+                # Start recording immediately in name-entry mode instead.
+                if short_phrase:
+                    recognizer.energy_threshold = 180
+                else:
+                    recognizer.adjust_for_ambient_noise(source, duration=.5)
                 # Read short chunks so Stop closes the laptop mic promptly.
                 seconds_per_chunk = source.CHUNK / source.SAMPLE_RATE
                 pre_roll = deque(maxlen=max(1,int(.4 / seconds_per_chunk)))
@@ -111,6 +116,10 @@ class Audio:
         except ValueError:
             raise
         except Exception as exc:
+            if type(exc).__name__=='UnknownValueError':
+                raise ValueError('I could not understand the speech. Try again and speak clearly near the laptop microphone, or type the name.') from None
+            if type(exc).__name__=='RequestError':
+                raise ValueError('Speech recognition could not connect. Check the laptop internet connection, or type the name.') from None
             raise ValueError(f'Laptop microphone or speech service: {type(exc).__name__}. Check input device and internet.') from exc
         finally:
             self.lock.release()

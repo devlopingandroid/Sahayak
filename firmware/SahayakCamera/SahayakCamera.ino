@@ -1,8 +1,11 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <time.h>
 #include "config.h"
 #include "WifiSetup.h"
+#include "CloudTrust.h"
 
 // AI Thinker ESP32-CAM. Camera only; microphone and speaker use the laptop.
 static const char* DEVICE_ID = "esp32-cam";
@@ -10,6 +13,33 @@ static uint32_t lastCapture = 0, lastConfig = 0, lastReconnect = 0;
 static uint32_t intervalMs = 10000;
 static bool captureEnabled = true;
 static CameraNetwork network;
+static HTTPClient backendHttp;
+static WiFiClient localClient;
+static WiFiClientSecure cloudClient;
+static String connectionBase;
+
+bool beginBackend(const char* path) {
+  String base = network.serverBase();
+  if (base != connectionBase) {
+    backendHttp.end(); localClient.stop(); cloudClient.stop();
+    connectionBase = base;
+  }
+  backendHttp.setReuse(true);
+  backendHttp.setConnectTimeout(6000);
+  if (base.startsWith("https://")) {
+    static bool clockRequested = false;
+    if (!clockRequested) {
+      configTime(0, 0, "pool.ntp.org", "time.google.com");
+      clockRequested = true;
+    }
+    // Certificate validity must be checked against a synchronized clock.
+    if (time(nullptr) < 1700000000) return false;
+    cloudClient.setCACert(SAHAYAK_CLOUD_ROOTS);
+    cloudClient.setHandshakeTimeout(10);
+    return backendHttp.begin(cloudClient, base + path);
+  }
+  return backendHttp.begin(localClient, base + path);
+}
 
 bool startCamera() {
   camera_config_t config = {};
@@ -34,9 +64,9 @@ bool startCamera() {
 }
 
 void pollConfig() {
-  HTTPClient http;
+  HTTPClient& http = backendHttp;
   http.setTimeout(4000);
-  if (!http.begin(network.serverBase() + "/api/device-config")) return;
+  if (!beginBackend("/api/device-config")) return;
   http.addHeader("X-Device-Token", DEVICE_TOKEN);
   int code = http.GET();
   if (code == 200) {
@@ -61,9 +91,9 @@ void pollConfig() {
 void sendFrame() {
   camera_fb_t* frame = esp_camera_fb_get();
   if (!frame) { Serial.println("No camera frame available."); return; }
-  HTTPClient http;
+  HTTPClient& http = backendHttp;
   http.setTimeout(12000);
-  if (http.begin(network.serverBase() + "/upload")) {
+  if (beginBackend("/upload")) {
     http.addHeader("Content-Type", "image/jpeg");
     http.addHeader("X-Device-Token", DEVICE_TOKEN);
     http.addHeader("X-Device-Id", DEVICE_ID);
@@ -74,6 +104,7 @@ void sendFrame() {
     if (code < 0) Serial.println(http.errorToString(code));
     if (code == 401) Serial.println("Check DEVICE_TOKEN in config.h.");
     if (code == 429) Serial.println("Laptop busy; will retry with the next fresh frame.");
+    if (code > 0) http.getString(); // Consume the reply to reuse the TLS connection.
     http.end();
   }
   esp_camera_fb_return(frame);

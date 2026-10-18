@@ -1,0 +1,21 @@
+.git
+.codex_artifacts
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.vercel
+**/data
+**/uploads
+**/known_faces
+**/config.h
+**/.env*
+**/*.sqlite3*
+**/*.db
+**/*.pt
+**/*.onnx
+**/memory_db.json
+**/tgtest.py
+outputs
+**/*.docx
+**/*.pptx
+Web Interface

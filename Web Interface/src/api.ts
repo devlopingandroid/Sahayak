@@ -15,10 +15,10 @@ export async function api<T = any>(
           ? data
           : JSON.stringify(data),
   }).catch(() => {
-    throw new Error("Cannot reach the laptop backend. Start SAHAYAK on the laptop and keep its online launcher open.");
+    throw new Error("Cannot reach the SAHAYAK backend. Check the server and internet connection, then try again.");
   });
   if ([502, 503, 504, 530].includes(response.status))
-    throw new Error("The laptop backend is offline or reconnecting. Start SAHAYAK Online on the laptop, wait for deployment to finish, then refresh this page.");
+    throw new Error("The SAHAYAK backend is offline or reconnecting. Wait a moment, then refresh this page.");
   const text = await response.text();
   let value;
   try {

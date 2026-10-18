@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: cloud.env
+    volumes:
+      - ./cloud-data:/data
+    expose:
+      - "5000"
+    cpus: 2
+    mem_limit: 8g
+    security_opt:
+      - no-new-privileges:true
+  https:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      BACKEND_HOST: ${BACKEND_HOST:?Set your HTTPS backend hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - backend
+volumes:
+  caddy-data:
+  caddy-config:

@@ -24,6 +24,8 @@ from werkzeug.exceptions import HTTPException
 from store import Store, now
 from vision import Vision
 from audio import Audio
+import conversation
+from enrollment import FaceRecording
 
 BASE = Path(__file__).resolve().parents[1]
 PATIENT = 'patient_001'
@@ -47,26 +49,37 @@ def discard_empty_frame(store, image_dir, path):
 
 def create_app(data_dir=None, start_workers=True):
     app = Flask(__name__, static_folder=None)
+    cloud=os.environ.get('SAHAYAK_CLOUD')=='1'
     data = Path(data_dir or os.environ.get('SAHAYAK_DATA', BASE / 'sahayak_cloud/data')).resolve()
     data.mkdir(parents=True, exist_ok=True)
     images = data / 'images'
     images.mkdir(exist_ok=True)
     store = Store(data / 'sahayak.sqlite3')
+    if cloud:
+        for key,env_name in (('password_hash','SAHAYAK_PASSWORD_HASH'),('session_key','SAHAYAK_SESSION_KEY'),
+                             ('device_token','SAHAYAK_DEVICE_TOKEN')):
+            value=os.environ.get(env_name)
+            if not store.get(key) and value:
+                store.set(key,value)
+        if not store.get('password_hash'):
+            raise RuntimeError('Cloud setup requires a migrated database or SAHAYAK_PASSWORD_HASH.')
+        if store.get('allow_legacy_upload') is None:
+            store.set('allow_legacy_upload',False)
     store.execute("UPDATE notifications SET status='failed',error='Application restarted before delivery was confirmed. Please resend.' WHERE status='queued'")
     for key in ('session_key','device_token'):
         if not store.get(key):
             store.set(key,secrets.token_urlsafe(32))
     app.secret_key = store.get('session_key')
-    app.config.update(MAX_CONTENT_LENGTH=6*1024*1024, SESSION_COOKIE_HTTPONLY=True,
+    app.config.update(MAX_CONTENT_LENGTH=6*1024*1024, SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SECURE=cloud,
         SESSION_COOKIE_SAMESITE='Strict', PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
         SESSION_COOKIE_NAME='sahayak_'+hashlib.sha256(str(data).encode()).hexdigest()[:8])
-    if data_dir is None:
+    if data_dir is None and not cloud:
         store.import_legacy(BASE, PATIENT)
     frames, notifications = queue.Queue(maxsize=3), queue.Queue(maxsize=30)
     previews={}
     device_setup_urls={}
     vision = Vision(BASE, store)
-    audio = Audio() if start_workers else None
+    audio = Audio() if start_workers and not cloud else None
     runtime = {'processed':0,'last_error':None,'last_processing_ms':0,'last_queue_ms':0,'listening':False,
         'enrollment':None}
     enrollment_lock=threading.RLock()
@@ -90,16 +103,16 @@ def create_app(data_dir=None, start_workers=True):
 
     def local():
         # A tunnel connects from loopback but its visitor is still remote.
-        return request.remote_addr in ('127.0.0.1','::1') and not request.headers.get('Cf-Connecting-IP')
+        return not cloud and request.remote_addr in ('127.0.0.1','::1') and not request.headers.get('Cf-Connecting-IP')
 
     @app.before_request
     def origins():
         from urllib.parse import urlparse
         origin=request.headers.get('Origin')
-        allowed=[]
+        allowed=[v.strip() for v in os.environ.get('SAHAYAK_ALLOWED_ORIGINS','').split(',') if v.strip()]
         remote_config=BASE/'.codex_artifacts/remote-access.json'
         try:
-            allowed=json.loads(remote_config.read_text(encoding='utf-8')).get('allowed_origins',[])
+            allowed+=json.loads(remote_config.read_text(encoding='utf-8')).get('allowed_origins',[])
         except (OSError,ValueError):
             pass
         if origin and request.method not in ('GET','HEAD','OPTIONS') and urlparse(origin).hostname!=request.host.split(':')[0] and origin not in allowed:
@@ -158,6 +171,46 @@ def create_app(data_dir=None, start_workers=True):
             raw=Path(path).read_bytes()
         return read_image(raw),rows[0]['last_seen']
 
+    recorder=FaceRecording(store,vision,save_image)
+    app.extensions['recorder']=recorder
+
+    def start_recording(value):
+        if not vision.ready:
+            raise ValueError('Wait until face recognition models are ready.')
+        if not store.get('capture_enabled',True):
+            raise ValueError('Enable camera capture in Settings before recording a person.')
+        enrollment=runtime['enrollment']
+        if enrollment and enrollment['state'] not in ('complete','timed_out'):
+            raise ValueError('Finish or stop the guided capture already in progress.')
+        device_id=value.get('device_id')
+        if not device_id:
+            devices=store.rows('SELECT id FROM devices ORDER BY last_seen DESC LIMIT 1')
+            device_id=devices[0]['id'] if devices else 'esp32-cam'
+        image,stamp=recent_camera_frame(device_id)
+        return recorder.start(device_id,image,stamp)
+
+    @app.post('/api/enrollment/start')
+    @auth
+    def record_person():
+        return jsonify(start_recording(body())),201
+
+    @app.post('/api/enrollment/<ident>/finish')
+    @auth
+    def finish_recording(ident):
+        value=body()
+        return jsonify(recorder.finish(ident,str(value.get('name','')),str(value.get('relationship','')))),201
+
+    @app.delete('/api/enrollment/<ident>')
+    @auth
+    def cancel_recording(ident):
+        recorder.cancel(ident)
+        return jsonify(ok=True)
+
+    @app.get('/api/enrollment/<ident>/photos/<int:index>')
+    @auth
+    def recording_photo(ident,index):
+        return serve_image(recorder.image(ident,index))
+
     def collect_enrollment_frame(enrollment,image,stamp,path=None):
         with enrollment_lock:
             if runtime['enrollment'] is not enrollment or enrollment['captured']>=enrollment['target']:
@@ -192,17 +245,19 @@ def create_app(data_dir=None, start_workers=True):
 
     defaults={'patient_name':'Your loved one','room':'','capture_interval':10,'capture_enabled':True,'camera_rotation':180,
         'language':'en-IN','face_threshold':.5,'retention_days':30,'telegram_enabled':False,
-        'telegram_chat':'','allow_legacy_upload':True,'patient_introduction':''}
+        'telegram_chat':'','allow_legacy_upload':True,'patient_introduction':'',
+        'ai_enabled':False,'ai_model':conversation.MODELS[0]}
 
     def settings_public():
         return {k:store.get(k,v) for k,v in defaults.items()} | {
-            'telegram_configured':bool(store.get('telegram_token')),'device_token':store.get('device_token')}
+            'telegram_configured':bool(store.get('telegram_token')),'device_token':store.get('device_token'),
+            'ai_configured':bool(store.get('gemini_api_key'))}
 
     @app.route('/api/auth',methods=['GET','POST','DELETE'])
     def authentication():
         configured=bool(store.get('password_hash'))
         if request.method=='GET':
-            return jsonify(configured=configured,authenticated=bool(session.get('caretaker')),local=local())
+            return jsonify(configured=configured,authenticated=bool(session.get('caretaker')),local=local(),cloud=cloud)
         if request.method=='DELETE':
             session.clear()
             return jsonify(ok=True)
@@ -250,8 +305,8 @@ def create_app(data_dir=None, start_workers=True):
             queue=frames.qsize(),**runtime,today_events=sum(datetime.fromisoformat(e['last_seen']).astimezone().date()==datetime.now().date() for e in events),
             people_count=store.rows('SELECT count(*) n FROM people WHERE deleted=0')[0]['n'],
             event_count=store.rows('SELECT count(*) n FROM events WHERE deleted=0 AND patient_id=?',(PATIENT,))[0]['n'],
-            notifications=store.rows('SELECT * FROM notifications ORDER BY created DESC LIMIT 5'),
-            audio_error=audio.error if audio else None,local_audio=local(),capture_enabled=store.get('capture_enabled',True))
+            recording=recorder.status(),notifications=store.rows('SELECT * FROM notifications ORDER BY created DESC LIMIT 5'),
+            audio_error=audio.error if audio else None,local_audio=local(),cloud=cloud,capture_enabled=store.get('capture_enabled',True))
 
     @app.route('/api/settings',methods=['GET','PATCH'])
     @auth
@@ -261,7 +316,7 @@ def create_app(data_dir=None, start_workers=True):
             # Validate the whole update before writing any settings.
             clean={}
             for key,item in value.items():
-                if key not in defaults and key!='telegram_token':
+                if key not in defaults and key not in ('telegram_token','gemini_api_key'):
                     continue
                 if key in ('capture_interval','retention_days'):
                     item=int(item)
@@ -275,9 +330,14 @@ def create_app(data_dir=None, start_workers=True):
                     item=int(item)
                     if item not in (0,180):
                         raise ValueError('Camera rotation must be 0 or 180 degrees.')
-                if key in ('capture_enabled','telegram_enabled','allow_legacy_upload') and not isinstance(item,bool):
+                if key in ('capture_enabled','telegram_enabled','allow_legacy_upload','ai_enabled') and not isinstance(item,bool):
                     raise ValueError('Switch values must be true or false.')
-                if key=='telegram_token' and not item:
+                if key=='ai_model' and item not in conversation.MODELS:
+                    raise ValueError('Choose a supported Gemini model.')
+                if key=='gemini_api_key':
+                    if not isinstance(item,str) or len(item)>256 or any(c.isspace() for c in item):
+                        raise ValueError('Enter a valid Gemini API key without spaces.')
+                if key in ('telegram_token','gemini_api_key') and not item:
                     continue
                 clean[key]=item
             for key,item in clean.items():
@@ -334,6 +394,7 @@ def create_app(data_dir=None, start_workers=True):
         enrollment=runtime['enrollment']
         collecting=bool(enrollment and enrollment['state'] not in ('complete','timed_out') and
             (datetime.now(timezone.utc)-datetime.fromisoformat(enrollment['started'])).total_seconds()<120)
+        collecting=collecting or bool(recorder.status() and recorder.status()['state']=='capturing')
         return jsonify(capture_interval=1 if collecting else store.get('capture_interval',10),capture_enabled=store.get('capture_enabled',True))
 
     @app.get('/api/devices/<ident>/image')
@@ -455,6 +516,8 @@ def create_app(data_dir=None, start_workers=True):
         if value.get('stop'):
             runtime['enrollment']=None
             return jsonify(ok=True)
+        if recorder.active():
+            raise ValueError('Finish or cancel Record a person before starting guided capture.')
         if not store.rows('SELECT id FROM people WHERE id=? AND deleted=0',(ident,)):
             return jsonify(error='Person not found.'),404
         if not vision.ready:
@@ -511,7 +574,7 @@ def create_app(data_dir=None, start_workers=True):
         store.execute('INSERT INTO help VALUES(?,?,?,?,?,?)',(ident,message,now(),'requested',None,notification))
         return {'id':ident,'status':'requested','delivery':state,'notification':notification}
 
-    def answer_query(value):
+    def local_answer(value):
         text=str(value.get('text','')).strip()
         lower=text.lower()
         if not text and not (value.get('object') or value.get('person')):
@@ -522,7 +585,7 @@ def create_app(data_dir=None, start_workers=True):
             introduction=store.get('patient_introduction','')
             return {'status':'approved' if introduction else 'not_found',
                 'response':introduction or 'Your caretaker has not added a personal introduction yet. Shall we ask them for help?'}
-        if re.search(r'\bhelp\b',lower) or any(k in lower for k in ('madad','मदद')):
+        if re.fullmatch(r'(?:sahayak[, ]+)?(?:please )?(?:i need |i want |can you |please )?help(?: me)?[.!? ]*',lower) or any(k in lower for k in ('madad','मदद')):
             result=request_help(text[:500])
             routines,summary=schedule_summary()
             confirmation=('I have saved your help request. I am sending your caretaker a Telegram alert. Delivery is not confirmed yet.'
@@ -602,6 +665,108 @@ def create_app(data_dir=None, start_workers=True):
         if obj and any(k in lower for k in ('my ','mera','मेरे','मेरा')):
             response+=' I cannot confirm ownership from generic object detection.'
         return {'status':'found','response':response,'event':event_json(event)}
+
+    def conversation_context():
+        # Share text facts only. No photos, embeddings, local paths or credentials.
+        people=store.rows('SELECT id,name,relationship,introduction FROM people WHERE deleted=0 ORDER BY name LIMIT 100')
+        routines=[r for r in routine_list() if r['enabled']][:50]
+        pending=[r for r in routines if r['step']<len(r['steps'])]
+        due=[r for r in pending if r['time']<=datetime.now().strftime('%H:%M')]
+        next_routine=due[-1] if due else (pending[0] if pending else None)
+        events=store.events(PATIENT,2000)
+        selected=[]
+        seen=set()
+        for i,event in enumerate(events):
+            labels={('object',o.lower()) for o in event['objects']}
+            labels.update(('person',p['id']) for p in event['people'])
+            if i<20 or labels-seen:
+                selected.append(event)
+                seen.update(labels)
+            if len(selected)>=100:
+                break
+        evidence={e['id']:e for e in selected}
+        facts=[{k:e.get(k) for k in ('id','last_seen','location','location_source','objects','verified','source')} |
+            {'people':[{'id':p['id'],'name':p['name']} for p in e['people']],
+             'recorded_local':datetime.fromisoformat(e['last_seen']).astimezone().isoformat()}
+            for e in selected]
+        approved=[]
+        for a in store.rows('SELECT question,answer,expires FROM answers WHERE deleted=0 LIMIT 100'):
+            if not a['expires'] or datetime.fromisoformat(a['expires'].replace('Z','+00:00')).astimezone(timezone.utc)>=datetime.now(timezone.utc):
+                approved.append(a)
+        context={'now_local':datetime.now().astimezone().isoformat(),
+            'patient_name':store.get('patient_name','Your loved one'),
+            'patient_introduction':store.get('patient_introduction',''),
+            'people':people,'routines':routines,'next_routine':next_routine,
+            'approved_answers':approved,'sightings':facts,
+            'scope':'Latest 20 events plus latest sightings per person/object within the latest 2000 events, capped at 100.'}
+        return context,evidence
+
+    def answer_query(value):
+        text=str(value.get('text','')).strip()
+        if len(text)>2000:
+            raise ValueError('Please keep your question under 2,000 characters.')
+        history=conversation.history_items(value.get('history'))
+        if re.fullmatch(r'(?:sahayak[, ]+)?(?:please )?(?:record|enroll|capture|add) (?:a |this |new |a new )?person[.!? ]*',text.lower()):
+            recording=start_recording(value)
+            return {'status':'recording','recording':recording,'engine':'local',
+                'response':'Recording a person. Keep one face in view and slowly turn left and right. I will ask for a name after capturing eight clear photos.'}
+        if not text or not store.get('ai_enabled',False):
+            return local_answer(value) | {'engine':'local'}
+        start=time.monotonic()
+        try:
+            key=store.get('gemini_api_key')
+            if not key:
+                raise conversation.ConversationUnavailable('Add your Gemini API key in Settings to enable AI conversation.')
+            context,evidence=conversation_context()
+            answer=conversation.generate(key,store.get('ai_model',conversation.MODELS[0]),text,history,context)
+            action=answer['action']
+            if action=='record_person':
+                recording=start_recording(value)
+                response={'status':'recording','recording':recording,
+                    'response':'Recording a person. Keep one face in view and slowly turn left and right. I will ask for a name after capturing eight clear photos.'}
+            elif action=='help':
+                # The actual delivery state comes from the server, never the model.
+                result=request_help(text[:500])
+                routines,summary=schedule_summary()
+                confirmation=('I have saved your help request. I am sending your caretaker a Telegram alert. Delivery is not confirmed yet.'
+                    if result['delivery']=='queued' else
+                    'I have saved your help request, but the Telegram alert could not be queued. Please call your caretaker directly.')
+                response={'status':'help','help':result,'routines':routines,'response':confirmation+' '+summary}
+            elif action=='memory':
+                event=evidence.get(answer['event_id'])
+                if not event:
+                    raise conversation.ConversationUnavailable('AI could not link that reply to a saved memory.')
+                response={'status':'found','response':answer['response'],'event':event_json(event)}
+            elif action=='schedule':
+                response={'status':'schedule','response':answer['response'],'routines':context['routines']}
+            elif action=='next':
+                routine=next((r for r in context['routines'] if r['id']==answer['routine_id']),None)
+                if not routine:
+                    raise conversation.ConversationUnavailable('AI could not link that reply to an approved routine.')
+                response={'status':'routine','response':answer['response'],'routine':routine}
+            else:
+                response={'status':'conversation','response':answer['response']}
+            return response | {'engine':'gemini','model':store.get('ai_model',conversation.MODELS[0]),
+                'latency_ms':round((time.monotonic()-start)*1000)}
+        except conversation.ConversationUnavailable as exc:
+            response=local_answer(value)
+            if response['status']=='not_found' and response['response'].startswith('Ask about an enrolled'):
+                response['response']='I cannot answer that fully while AI is unavailable. You can still ask about saved people, objects and daily routines.'
+            return response | {'engine':'local','ai_notice':str(exc)}
+
+    @app.post('/api/ai/test')
+    @auth
+    def test_ai():
+        key=store.get('gemini_api_key')
+        if not key:
+            raise ValueError('Save a Gemini API key in Settings first.')
+        try:
+            start=time.monotonic()
+            answer=conversation.generate(key,store.get('ai_model',conversation.MODELS[0]),
+                'Say hello in one short sentence.',[],{})
+            return jsonify(ok=True,response=answer['response'],latency_ms=round((time.monotonic()-start)*1000))
+        except conversation.ConversationUnavailable as exc:
+            return jsonify(error=str(exc)),503
 
     @app.post('/api/query')
     @app.post('/query')
@@ -732,10 +897,15 @@ def create_app(data_dir=None, start_workers=True):
             raise ValueError('Audio service unavailable.')
         if runtime['listening']:
             raise ValueError('Already listening.')
+        value=body()
+        history=conversation.history_items(value.get('history'))
         runtime['listening']=True
         try:
-            transcript=audio.listen(store.get('language','en-IN'))
-            return jsonify(text=transcript,**answer_query({'text':transcript}))
+            transcript=(audio.listen(store.get('language','en-IN'),short_phrase=True)
+                if value.get('purpose')=='person_name' else audio.listen(store.get('language','en-IN')))
+            if value.get('purpose')=='person_name':
+                return jsonify(text=transcript)
+            return jsonify(text=transcript,**answer_query({'text':transcript,'history':history}))
         finally:
             runtime['listening']=False
 
@@ -785,6 +955,7 @@ def create_app(data_dir=None, start_workers=True):
             runtime['last_queue_ms']=round(max(0,(datetime.now(timezone.utc)-datetime.fromisoformat(stamp)).total_seconds()*1000))
             try:
                 image=cv2.imread(path)
+                recorder.feed(device,image,stamp)
                 enrollment=runtime['enrollment']
                 if enrollment and enrollment['device_id']==device:
                     collect_enrollment_frame(enrollment,image,stamp,path)
@@ -835,6 +1006,7 @@ def create_app(data_dir=None, start_workers=True):
                 refs={r['image'] for r in store.rows('SELECT image FROM events WHERE deleted=0') if r['image']}
                 refs|={r['image'] for r in store.rows('SELECT image FROM devices') if r['image']}
                 refs|={r['path'] for r in store.rows('SELECT path FROM samples')}
+                refs|=recorder.protected_paths()
                 for path in images.glob('*.jpg'):
                     if str(path) not in refs and time.time()-path.stat().st_mtime>3600:
                         path.unlink(missing_ok=True)

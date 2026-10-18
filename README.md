@@ -1,8 +1,28 @@
 # SAHAYAK
 
-## Hosted frontend with laptop backend
+An ESP32-CAM personal memory assistant with object detection, familiar-face recognition, natural AI conversation, routines and Telegram assistance.
 
-The **Start SAHAYAK Online.cmd** desktop launcher runs `start-remote-sahayak.py`. It starts the laptop backend if needed, creates a temporary Cloudflare tunnel, updates the allowed frontend origins and redeploys the Vercel API proxy to the current tunnel. Keep its window open and the laptop running. The separate **Start SAHAYAK Backend.cmd** launcher starts local access only.
+## Current cloud deployment
+
+- Dashboard: https://sahayak-memory-assistant.vercel.app
+- Backend: Northflank Developer Sandbox, London, one 512 MB instance with a persistent 6 GB volume. See [cloud deployment and verification](deploy/CLOUD.md).
+- The camera uploads directly over verified HTTPS; the laptop backend is not required. Wi-Fi and cloud settings survive power-bank restarts.
+- Cloud inference uses OpenCV YOLOv8n ONNX, YuNet and SFace. SQLite and photos remain on the persistent volume. The multi-stage Docker build keeps PyTorch out of the runtime image.
+- Cloud voice input/output uses the browser device's microphone and speaker. Local mode retains laptop speech services. No audio hardware is attached to the ESP32.
+- Checks covered live uploads, recognition, protected photos, AI replies and restart persistence. One live frame processed in about 929 ms; shared CPU and network conditions affect latency.
+
+References: [Architecture](ARCHITECTURE.md), [API](API.md), [Models](MODELS.md). Credentials, Wi-Fi settings, databases, face photos and model weights are excluded from Git.
+
+
+## Natural AI conversation
+
+Open **Settings → Ask Sahayak AI**, paste a [Google AI Studio API key](https://aistudio.google.com/apikey), select Gemini Flash (balanced quality/speed) or Flash-Lite (speed), enable AI conversation and save. Use **Test saved AI connection** to verify access and measure one request's latency. Keys stay in the backend's private SQLite settings and are never returned to the dashboard; do not commit that database.
+
+Ask everyday questions naturally and follow up on earlier replies. Gemini receives the question, up to 12 recent chat messages and a limited text snapshot of enrolled people, sightings, approved answers and daily routines. Photos and face embeddings are excluded. Provider terms and charges apply; requests use `store=false`. Chat history resets on reload. AI can make mistakes, has no web search, and cannot establish current location from past sightings. If Gemini is disabled or unavailable, local memory/routine assistance remains available with a visible fallback notice after API failures.
+
+## Optional hosted frontend with laptop backend
+
+The **Start SAHAYAK Online.cmd** desktop launcher runs `start-remote-sahayak.py`. With cloud mode selected in its private configuration, it opens the online dashboard without replacing the cloud API route. In optional laptop/tunnel mode, it starts the laptop backend, creates a temporary Cloudflare tunnel and redeploys the Vercel proxy; keep the laptop and launcher running for that mode. The separate **Start SAHAYAK Backend.cmd** launcher starts local access only.
 
 The temporary tunnel address changes after restarting. Wait for the online launcher to finish redeployment before using the hosted dashboard. An internet connection and the existing Vercel CLI sign-in are required. A permanent domain/tunnel can replace this later.
 
@@ -30,11 +50,11 @@ cd ..
 python sahayak_cloud/server.py
 ```
 
-Python 3.11 or 3.12 is recommended for a new installation. Windows needs a working microphone, audio output and the PyAudio dependency. Hindi recognition uses `hi-IN`; spoken Hindi depends on the Windows voices installed on the laptop. No microphone or speaker is attached to the ESP32 in this design.
+Python 3.11 or 3.12 is recommended for a new local installation. Local Windows voice input needs a microphone, audio output and PyAudio. Current speech interaction uses English. No microphone or speaker is attached to the ESP32.
 
 ## Connect the ESP32
 
-USB powers/programs the device. **Image transport is Wi-Fi, not USB serial.** Both devices must be on a network where the camera can reach TCP port 5000 on the laptop.
+USB powers/programs the device. **Image transport is Wi-Fi, not USB serial.** For cloud mode the camera needs internet access to the HTTPS backend. For local mode it must reach TCP port 5000 on the laptop.
 
 The laptop Wi-Fi address observed during development was **192.168.163.157**; verify it with `ipconfig` before flashing. The old firmware pointed to `192.168.1.18`, so update that address if it no longer belongs to this laptop. Network isolation, a stopped server or the Windows firewall can prevent uploads. If Windows asks about Python network access, permit only the trusted private network you intend to use.
 
@@ -45,9 +65,9 @@ For the updated firmware:
 3. Reset into normal operating mode. Open Serial Monitor at 115200 baud. Successful uploads return HTTP **202** (queued for inference).
 4. On the dashboard, check that frames arrive and model status is Ready. After the new firmware works, switch off **Allow original firmware without device token** in Settings.
 
-The new firmware sends binary JPEG to reduce memory use; the backend also accepts the original Base64 JSON `/upload` payload. It polls `/api/device-config` every 15 seconds for capture interval/pause. The original firmware cannot physically pause capture or change interval remotely: server-side pause rejects its incoming frames without processing them. No outage buffer is promised; missed observations are gaps.
+The new firmware sends binary JPEG to reduce memory use; the backend also accepts the original Base64 JSON `/upload` payload. It polls `/api/device-config` every four seconds for capture interval/pause. The original firmware cannot physically pause capture or change interval remotely: server-side pause rejects its incoming frames without processing them. No outage buffer is promised; missed observations are gaps.
 
-Incoming camera frames are rotated 180 degrees on the laptop by default to correct an inverted mount. Change Camera orientation in Settings if you remount the camera. Rotation is applied before preview, recognition and saved evidence; manually uploaded enrollment photos and historical evidence are unchanged. Successfully processed frames with neither objects nor recognized people are deleted immediately from managed disk storage unless they are referenced by enrollment samples or saved evidence. The latest camera preview is kept in RAM, so empty frames can still appear in the live view without accumulating image files. Frames whose inference failed are not treated as empty detections.
+Incoming camera frames are rotated 180 degrees on the backend by default to correct an inverted mount. Change Camera orientation in Settings if you remount the camera. Rotation is applied before preview, recognition and saved evidence; manually uploaded enrollment photos and historical evidence are unchanged. Successfully processed frames with neither objects nor recognized people are deleted immediately from managed disk storage unless they are referenced by enrollment samples or saved evidence. The latest camera preview is kept in RAM, so empty frames can still appear in the live view without accumulating image files. Frames whose inference failed are not treated as empty detections.
 
 ## Use the application
 
@@ -72,7 +92,11 @@ Changing Wi-Fi does not change the enrolled people, memories or Telegram configu
 - **Patient view:** larger controls for person introduction, phone search, next activity and help.
 - **Settings:** room label, language, retention, capture interval, matching threshold, Telegram and system diagnostics.
 
-## Telegram
+## Record a person from the homepage
+
+Use **Record a person**, or press the homepage microphone button and say **“Record a person.”** Keep the same person in the ESP32 view and slowly vary face angle/expression. The laptop rejects dark, blurred and near-duplicate face photos. After eight selected photos (or seven if the 150-second capture times out), it asks **“What name should I give this person?”** Type a name and save, or click **Say the name** and speak only the name to save automatically. Relationship is optional. Saving creates the profile, keeps the photos on the laptop and enables recognition. Cancel removes unfinished captures. This requires the ESP32 to be online and sending fresh frames; the laptop controls voice and microphone. Existing manual photo approval is unchanged.
+
+## Telegram setup
 
 Create a bot with Telegram's BotFather, start the bot from the intended recipient account and enter the bot token and recipient chat ID in Settings. Enable sharing, save, then use the connection test. Status progresses from queued to sent/failed. A help request is not acknowledged merely because Telegram accepted the message: caretaker acknowledgement is a separate action in the dashboard. Selected photos sent through Telegram leave the laptop.
 
@@ -82,7 +106,7 @@ The implementation does not automatically reuse the credentials in old Telegram 
 
 - **Objects:** existing local `yolov8n.pt`, run through Ultralytics on the laptop. The supported class list appears in Settings. Generic object labels do not establish ownership or distinguish identical phones.
 - **Faces:** OpenCV Zoo **YuNet 2023mar** detection and **SFace 2021dec** embeddings. This replaces the unavailable dlib Python dependency in the inspected environment. Enrollment stores normalized embeddings; matching requires an approved sample, a configured cosine-similarity threshold and a separation margin between candidate identities. Similarity scores are not calibrated probabilities. Test the threshold on real camera footage.
-- **Memory retrieval:** structured SQLite filtering and grounded response templates. A general-purpose LLM and vector database are not required. Unknown, stale or absent observations are not fabricated.
+- **Conversation and memory retrieval:** optional Gemini conversation grounded in SQLite text records, with local filtering/templates as a fallback. No vector database is required. Personal answers depend on saved evidence; model responses can still be incorrect.
 
 Model sources: https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet and https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface. Retain and review upstream model and Ultralytics licensing before redistribution or commercialization.
 
@@ -94,7 +118,7 @@ Runtime storage: `sahayak_cloud/data/sahayak.sqlite3`, managed images under `dat
 
 Camera-event retention hides old camera events; maintenance removes unreferenced managed photos older than one hour. Legacy images and original reference photos outside `data/images` are not removed. “Hide memory” is a soft hide, not secure erasure. Back up the database and images together with the application stopped. Face profiles, photos and past observations are sensitive personal data.
 
-The initial application supports **one patient profile**, `patient_001`, with one caretaker login. It is a trusted private-LAN prototype. Do not expose port 5000 publicly; remote deployment would require HTTPS and additional access, auditing and operational controls.
+The initial application supports **one patient profile**, `patient_001`, with one caretaker login. It supports local and cloud deployments. Cloud mode requires HTTPS, preconfigured authentication and persistent storage; see deploy/CLOUD.md. Do not expose an unauthenticated local port 5000 publicly.
 
 ## Development and verification
 
@@ -113,6 +137,6 @@ This is an assistive prototype, not a clinical assessment or proof of patient be
 
 ## Enrollment capture and responsiveness
 
-Manual and guided camera enrollment read the latest in-memory preview, including when the empty-frame disk copy has been removed. Guided enrollment attempts the latest frame immediately, collects distinct later frames and reports waiting-for-face, completion and timeout states. The enrollment dialog shows the live preview and quality guidance. While guided collection is active, device configuration requests a one-second capture interval; the existing firmware polls configuration every 15 seconds. The dashboard refreshes once per second without overlapping refresh batches.
+Manual and guided camera enrollment read the latest in-memory preview, including when the empty-frame disk copy has been removed. Guided enrollment attempts the latest frame immediately, collects distinct later frames and reports waiting-for-face, completion and timeout states. The enrollment dialog shows the live preview and quality guidance. While guided collection is active, device configuration requests a one-second capture interval; the existing firmware polls configuration every four seconds. The dashboard refreshes once per second without overlapping refresh batches.
 
 API failures return JSON errors, and the frontend handles non-JSON failures with a readable message. The updated camera firmware uses two PSRAM frame buffers with `CAMERA_GRAB_LATEST` and disables Wi-Fi modem sleep to favour responsiveness; it has been compiled and flashed on COM7. Measured capture rate still depends on Wi-Fi conditions, image size and laptop load.

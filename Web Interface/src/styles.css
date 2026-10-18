@@ -2136,3 +2136,7 @@ footer > span:last-child {
   font-size: 11px;
   color: #766783;
 }
+.record-home { padding: 24px; margin-bottom: 24px; }
+.record-home p { margin: 10px 0 16px; }
+.record-photos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.record-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; }

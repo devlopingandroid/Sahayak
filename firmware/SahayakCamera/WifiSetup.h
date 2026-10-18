@@ -45,7 +45,7 @@ class CameraNetwork {
     html += "<label for='ssid'>Wi-Fi name</label><input id='ssid' name='ssid' maxlength='32' required value='"+escape(ssid)+"' autocomplete='off'>";
     html += "<label for='password'>Wi-Fi password</label><input id='password' name='password' type='password' maxlength='63' autocomplete='new-password'><small>Leave blank to keep the saved password for the same network. For a different network, enter its password.</small>";
     html += "<label><input style='width:auto' type='checkbox' name='open' value='yes'> This network has no password</label>";
-    html += "<label for='address'>Laptop server address</label><input id='address' name='address' type='url' required value='"+escape(address)+"' placeholder='http://192.168.1.10:5000'><small>Use the laptop's Wi-Fi IPv4 address with port 5000. Start the SAHAYAK server on the laptop.</small>";
+    html += "<label for='address'>SAHAYAK backend address</label><input id='address' name='address' type='url' required value='"+escape(address)+"' placeholder='https://your-backend.example.com'><small>Use your cloud HTTPS backend, or a local laptop HTTP address such as http://192.168.1.10:5000.</small>";
     html += "<button>Save and reconnect</button></form><p>After saving, the camera restarts. If it cannot connect within 30 seconds, this setup network returns so you can correct the settings.</p></main></html>";
     web.send(200, "text/html; charset=utf-8", html);
   }
@@ -55,21 +55,27 @@ class CameraNetwork {
     String nextSsid=web.arg("ssid"), nextPassword=web.arg("password"), nextAddress=web.arg("address");
     nextAddress.trim();
     while (nextAddress.endsWith("/")) nextAddress.remove(nextAddress.length()-1);
-    String host=nextAddress.startsWith("http://") ? nextAddress.substring(7) : "";
+    bool https=nextAddress.startsWith("https://");
+    String host=https ? nextAddress.substring(8) : (nextAddress.startsWith("http://") ? nextAddress.substring(7) : "");
     if (!nextSsid.length() || nextSsid.length()>32 || !host.length() || host.indexOf('/')>=0 || host.indexOf('@')>=0 || host.indexOf('?')>=0 || host.indexOf('#')>=0 || host.indexOf(' ')>=0 || host.indexOf('\r')>=0 || host.indexOf('\n')>=0 || host.indexOf('\\')>=0 || nextAddress.length()>180) {
-      web.send(400,"text/plain","Enter a Wi-Fi name and a local HTTP server address such as http://192.168.1.10:5000. Go back to correct the form."); return;
+      web.send(400,"text/plain","Enter a Wi-Fi name and an HTTPS cloud backend or private HTTP laptop address. Go back to correct the form."); return;
     }
     int portAt=host.indexOf(':');
     String hostIp=portAt<0 ? host : host.substring(0,portAt);
-    String port=portAt<0 ? "80" : host.substring(portAt+1);
+    String port=portAt<0 ? (https ? "443" : "80") : host.substring(portAt+1);
     bool validPort=port.length()>0 && port.length()<=5;
     for (unsigned i=0;i<port.length();i++) if (port[i]<'0' || port[i]>'9') validPort=false;
     IPAddress serverIp;
     bool privateIp=serverIp.fromString(hostIp) && (serverIp[0]==10 ||
       (serverIp[0]==192 && serverIp[1]==168) || (serverIp[0]==172 && serverIp[1]>=16 && serverIp[1]<=31) ||
       (serverIp[0]==169 && serverIp[1]==254));
-    if (!privateIp || !validPort || port.toInt()<1 || port.toInt()>65535) {
-      web.send(400,"text/plain","Use your laptop's private Wi-Fi IPv4 address and a valid port, for example http://192.168.1.10:5000. Do not use localhost or a public website."); return;
+    bool validDomain=hostIp.indexOf('.')>0 && !serverIp.fromString(hostIp) && hostIp.length()<=253;
+    for (unsigned i=0;i<hostIp.length();i++) {
+      char c=hostIp[i];
+      if (!((c>='a' && c<='z') || (c>='A' && c<='Z') || (c>='0' && c<='9') || c=='.' || c=='-')) validDomain=false;
+    }
+    if (!(https ? validDomain : privateIp) || !validPort || port.toInt()<1 || port.toInt()>65535) {
+      web.send(400,"text/plain","Use an HTTPS cloud hostname, or your laptop's private HTTP Wi-Fi IPv4 address with a valid port. Public HTTP is not allowed."); return;
     }
     if (web.arg("open")=="yes") nextPassword="";
     else if (!nextPassword.length() && nextSsid==ssid) nextPassword=password;
@@ -94,6 +100,15 @@ public:
     String saved=preferences.getString("network","");
     int first=saved.indexOf('\n'), second=saved.indexOf('\n',first+1);
     if (first>0 && second>first) { ssid=saved.substring(0,first); password=saved.substring(first+1,second); address=saved.substring(second+1); }
+    // Apply a newly installed cloud destination once, retaining the saved Wi-Fi.
+    // Later edits through the setup page remain authoritative until another
+    // cloud destination is compiled and installed.
+    String cloudDefault(defaultAddress);
+    if (cloudDefault.startsWith("https://") && preferences.getString("cloud-default","")!=cloudDefault) {
+      address=cloudDefault;
+      preferences.putString("network",ssid+"\n"+password+"\n"+address);
+      preferences.putString("cloud-default",cloudDefault);
+    }
     setupPassword=preferences.getString("setup-pass","");
     if (setupPassword.length()<12) {
       char generated[25]; snprintf(generated,sizeof(generated),"%08lx%08lx",(unsigned long)esp_random(),(unsigned long)esp_random());

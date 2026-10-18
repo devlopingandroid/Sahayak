@@ -5,6 +5,7 @@
 Web Interface/dist/
 sahayak_cloud/data/
 sahayak_cloud/models/*.onnx
+sahayak_cloud/models/object_labels.json
 firmware/**/config.h
 .env
 .env.*
@@ -28,3 +29,6 @@ uploads/
 sahayak_cloud/uploads/
 sahayak_cloud/known_faces/
 **/memory_db.json
+deploy/cloud.env
+deploy/cloud-data/
+deploy/*.tar.gz

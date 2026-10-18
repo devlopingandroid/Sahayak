@@ -36,6 +36,7 @@ import {
   X,
 } from "lucide-react";
 import { api, dateTime, timeOnly, Memory, Person, Routine } from "./api";
+import { browserMicrophoneAvailable, listenInBrowser, speakInBrowser, stopBrowserListening } from "./browser-audio";
 
 const pages = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -196,6 +197,10 @@ export default function App() {
   const [form, setForm] = useState<any>({}),
     [draft, setDraft] = useState<any>(null),
     [token, setToken] = useState("");
+  const [aiKey, setAiKey] = useState("");
+  const [recordName, setRecordName] = useState(""),
+    [recordRelationship, setRecordRelationship] = useState("");
+  const recordingPrompt = useRef("");
   const chatEnd = useRef<HTMLDivElement>(null),
     reminder = useRef(new Set<string>()),
     refreshPending = useRef(false);
@@ -266,6 +271,16 @@ export default function App() {
     chatEnd.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [chat]);
   useEffect(() => {
+    const recording = status?.recording;
+    if (!recording || recording.state === "saved") return;
+    setModal("record");
+    if (recording.state === "awaiting_name" && recordingPrompt.current !== recording.id) {
+      recordingPrompt.current = recording.id;
+      speakFeedback("The photos are ready. What name should I give this person? You can type a name or press Say the name.")
+        .catch((e) => setError(e.message));
+    }
+  }, [status?.recording?.id, status?.recording?.state]);
+  useEffect(() => {
     const time = new Date().toLocaleTimeString("en-GB", {
       hour: "2-digit",
       minute: "2-digit",
@@ -288,30 +303,87 @@ export default function App() {
     setSidebar(false);
     setSearch("");
   };
-  const say = (text: string) =>
-    run(() => api("/audio/speak", "POST", { text }));
+  const browserAudio = !!status?.cloud;
+  const microphoneAvailable = !!status?.local_audio || (browserAudio && browserMicrophoneAvailable());
+  const storagePlace = status?.cloud ? "your private cloud server" : "this laptop";
+  const speakFeedback = async (text: string) => {
+    if (status?.local_audio) await api("/audio/speak", "POST", { text });
+    else if (browserAudio) speakInBrowser(text, settings?.language || "en-IN");
+  };
+  const stopListening = () => {
+    if (browserAudio) stopBrowserListening();
+    else api("/audio/cancel", "POST", {}).catch((e) => setError(e.message));
+  };
+  const say = (text: string) => run(() => speakFeedback(text));
+  const chatHistory = () => chat.slice(-12).map((m) => ({
+    role: m.role,
+    content: String(m.role === "assistant" ? m.response : m.text).slice(0, 2000),
+  }));
+  const startRecording = () => run(async () => {
+    const recording = await api("/enrollment/start", "POST", {});
+    setRecordName("");
+    setRecordRelationship("");
+    setStatus((s: any) => ({ ...s, recording }));
+    setModal("record");
+    await speakFeedback("Keep one person in the camera view. Slowly turn your face left and right. I will ask for a name after eight clear photos.");
+  });
+  const saveRecording = async (name: string) => {
+    const result = await api(`/enrollment/${status.recording.id}/finish`, "POST", {
+      name, relationship: recordRelationship,
+    });
+    setModal(null);
+    setToast(`${result.name} saved with ${result.samples} photos on ${storagePlace}. Recognition is enabled.`);
+    await speakFeedback(`${result.name} has been saved and is ready for recognition.`);
+  };
+  const sayRecordingName = async () => {
+    if (busy || listening) return;
+    setListening(true);
+    await run(async () => {
+      const result = browserAudio ? { text: await listenInBrowser(settings?.language || "en-IN") }
+        : await api("/audio/listen", "POST", { purpose: "person_name" });
+      const name = result.text.replace(/^(?:(?:his|her|their|the person's) name is|the name is|name is|call (?:him|her|them))\s+/i, "").replace(/[.!?]+$/, "").trim();
+      setRecordName(name);
+      await saveRecording(name);
+    });
+    setListening(false);
+  };
   const ask = async (text = question) => {
     if (!text.trim() || busy || listening) return;
     setQuestion("");
     setChat((c) => [...c, { role: "user", text }]);
     await run(async () => {
-      const result = await api("/query", "POST", { text });
+      const result = await api("/query", "POST", { text, history: chatHistory() });
+      if (result.recording) {
+        setRecordName(""); setRecordRelationship("");
+        setStatus((s: any) => ({ ...s, recording: result.recording }));
+        setModal("record");
+      }
       setChat((c) => [...c, { role: "assistant", ...result }]);
-      if (status?.local_audio)
-        await api("/audio/speak", "POST", { text: result.response });
+      await speakFeedback(result.response);
     });
   };
   const listen = async () => {
     if (busy) return;
     setListening(true);
     await run(async () => {
-      const result = await api("/audio/listen", "POST", {});
+      let result;
+      if (browserAudio) {
+        const text = await listenInBrowser(settings?.language || "en-IN");
+        result = { ...await api("/query", "POST", { text, history: chatHistory() }), text };
+      } else result = await api("/audio/listen", "POST", { history: chatHistory() });
+      if (result.recording) {
+        setRecordName(""); setRecordRelationship("");
+        setStatus((s: any) => ({ ...s, recording: result.recording }));
+        setModal("record");
+      } else if (page === "overview") {
+        navigate("ask");
+      }
       setChat((c) => [
         ...c,
         { role: "user", text: result.text },
         { role: "assistant", ...result },
       ]);
-      await api("/audio/speak", "POST", { text: result.response });
+      await speakFeedback(result.response);
     });
     setListening(false);
   };
@@ -376,7 +448,7 @@ export default function App() {
         </div>
         <main className="auth-form">
           <span className="badge">
-            <ShieldCheck size={14} /> Stored on your laptop
+            <ShieldCheck size={14} /> Stored on {auth?.cloud ? "your private cloud server" : "your laptop"}
           </span>
           <h2>
             {auth?.configured
@@ -423,9 +495,9 @@ export default function App() {
             </button>
           </form>
           <p className="fine">
-            Recognition and primary storage run on your laptop. When using the
-            hosted dashboard, requested photos and data pass through Cloudflare
-            and Vercel. Speech recognition and Telegram use external services.
+            {auth?.cloud
+              ? "Recognition and primary storage run on your private cloud server. The dashboard uses this device’s microphone and speaker. Gemini, speech recognition and Telegram use external services."
+              : "Recognition and primary storage run on your laptop. When using the hosted dashboard, requested photos and data pass through Cloudflare and Vercel. Speech recognition and Telegram use external services."}
           </p>
         </main>
       </div>
@@ -464,7 +536,7 @@ export default function App() {
             <br />
             More room for living.
           </p>
-          <span>Your memories stay on your laptop.</span>
+          <span>Your memories stay on {storagePlace}.</span>
         </div>
         <div className="sidebar-bottom">
           <button
@@ -558,7 +630,7 @@ export default function App() {
             </span>
             <span className="badge">
               <ShieldCheck size={12} />
-              Laptop processing
+              {status?.cloud ? "Cloud processing" : "Laptop processing"}
             </span>
           </div>
           {error && (
@@ -579,6 +651,21 @@ export default function App() {
             >
               {page === "overview" && (
                 <>
+                  <section className="card record-home">
+                    <div>
+                      <h3>Remember someone new</h3>
+                      <p>Capture eight clear face photos, then give the person a name. Everything is saved on {storagePlace}.</p>
+                    </div>
+                    <div className="modal-actions">
+                      <button className="primary" disabled={busy || !!status?.recording && status.recording.state !== "saved"}
+                        onClick={startRecording}><Camera size={17} /> Record a person</button>
+                      <button className="secondary" disabled={busy || listening || !microphoneAvailable}
+                        onClick={listen}><Mic size={17} /> {listening ? "Listening…" : "Say “Record a person”"}</button>
+                      {status?.recording && status.recording.state !== "saved" &&
+                        <button className="text-button" onClick={() => setModal("record")}>Continue recording</button>}
+                    </div>
+                    <p className="fine">Press the microphone button before speaking. Keep one consenting person in view and slowly vary their face angle.</p>
+                  </section>
                   <div className="hero-grid">
                     <section className="hero card">
                       <div className="hero-copy">
@@ -909,6 +996,7 @@ export default function App() {
                             </span>
                             <div>
                               <p>{m.role === "assistant" ? m.response : m.text}</p>
+                              {m.ai_notice && <small className="fine">{m.ai_notice} Using local assistance.</small>}
                               {m.event && (
                                 <div className="answer-evidence">
                                   {m.event.image_url && (
@@ -971,7 +1059,7 @@ export default function App() {
                       {listening && (
                         <div className="listening">
                           <AudioLines className="pulse" />
-                          Listening through your laptop microphone…
+                          Listening through your microphone…
                         </div>
                       )}
                       <div ref={chatEnd} />
@@ -986,25 +1074,24 @@ export default function App() {
                       <button
                         type="button"
                         className={"mic-button " + (listening ? "pulse" : "")}
-                        disabled={(busy && !listening) || !status?.local_audio}
+                        disabled={(busy && !listening) || !microphoneAvailable}
                         onClick={() =>
                           listening
-                            ? api("/audio/cancel", "POST", {}).catch((e) =>
-                                setError(e.message),
-                              )
+                            ? stopListening()
                             : listen()
                         }
                         aria-label={
                           listening
-                            ? "Stop laptop microphone"
-                            : "Listen using laptop microphone"
+                            ? "Stop microphone"
+                            : "Listen using microphone"
                         }
                       >
                         {listening ? <X size={21} /> : <Mic size={21} />}
                       </button>
                       <input
                         aria-label="Your question"
-                        placeholder="Ask a question. We’re listening."
+                        placeholder="Ask Sahayak anything…"
+                        maxLength={2000}
                         value={question}
                         onChange={(e) => setQuestion(e.target.value)}
                         disabled={busy}
@@ -1018,8 +1105,12 @@ export default function App() {
                       </button>
                     </form>
                     <p className="assistant-note">
+                      {settings?.ai_enabled && settings?.ai_configured
+                        ? "Gemini conversation is enabled. Relevant saved text records are shared with Google. "
+                        : "Local assistance. Enable Gemini in Settings for open conversation. "}
                       {status?.local_audio
                         ? "The microphone and spoken feedback use your laptop. Speech recognition needs internet."
+                        : browserAudio ? "The microphone and speaker use this browser. Allow microphone access when prompted. Speech recognition needs internet."
                         : "Open localhost on the laptop to use its microphone and speaker."}
                     </p>
                   </section>
@@ -1532,14 +1623,56 @@ export default function App() {
                       const saved = await api("/settings", "PATCH", {
                         ...draft,
                         telegram_token: token,
+                        gemini_api_key: aiKey,
                       });
                       setSettings(saved);
                       setDraft(saved);
                       setToken("");
+                      setAiKey("");
                     }, "Preferences saved.");
                   }}
                 >
                   <div className="settings-grid">
+                    <section className="card settings-card">
+                      <h3>Ask Sahayak AI</h3>
+                      <p>Natural conversation, follow-up questions and answers using your saved memories.</p>
+                      <label>
+                        Conversation model
+                        <select value={draft.ai_model || "gemini-3.8-flash"}
+                          onChange={(e) => setDraft({ ...draft, ai_model: e.target.value })}>
+                          <option value="gemini-3.8-flash">Gemini 3.8 Flash · balanced quality and speed</option>
+                          <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite · prioritize speed</option>
+                        </select>
+                      </label>
+                      <label>
+                        Gemini API key
+                        <input type="password" autoComplete="off" value={aiKey}
+                          onChange={(e) => setAiKey(e.target.value)}
+                          placeholder={draft.ai_configured ? "Key saved; leave blank to keep" : "Paste your Google AI Studio API key"} />
+                      </label>
+                      <p className="fine">
+                        The key is stored in the backend settings database and is never returned to the dashboard.
+                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer"> Get a Gemini API key</a>.
+                      </p>
+                      <label className="switch-row">
+                        <input type="checkbox" checked={!!draft.ai_enabled}
+                          onChange={(e) => setDraft({ ...draft, ai_enabled: e.target.checked })} />
+                        Enable AI conversation
+                      </label>
+                      <p className="fine">
+                        Enabling AI sends your question, up to 12 recent chat messages and a limited text snapshot of enrolled people,
+                        sightings, approved answers and routines to Google. Camera photos and face embeddings stay on {storagePlace}.
+                        Provider terms and API charges apply. AI can make mistakes. Local assistance stays available during outages.
+                      </p>
+                      <button type="button" className="secondary" disabled={busy || !draft.ai_configured}
+                        onClick={() => run(async () => {
+                          const result = await api("/ai/test", "POST", {});
+                          setToast(`Gemini connected · ${result.latency_ms} ms. ${result.response}`);
+                        })}>
+                        Test saved AI connection
+                      </button>
+                      <p className="fine">Save preferences before testing a new key or model.</p>
+                    </section>
                     <section className="card settings-card">
                       <h3>Your personal space</h3>
                       <p>Make daily assistance feel familiar.</p>
@@ -1594,7 +1727,7 @@ export default function App() {
                     </section>
                     <section className="card settings-card">
                       <h3>Camera & recognition</h3>
-                      <p>All recognition runs on this laptop.</p>
+                      <p>All recognition runs on {storagePlace}.</p>
                       <div className="answer-evidence">
                         <h4>Camera Wi-Fi setup</h4>
                         <p>
@@ -1838,9 +1971,8 @@ export default function App() {
                         <p className="error">{status.audio_error}</p>
                       )}
                       <p className="fine">
-                        Use http://localhost:5000 on the laptop for microphone
-                        and speaker. The ESP32 upload address is the laptop’s
-                        Wi-Fi IP followed by :5000/upload.
+                        {status?.cloud ? "Microphone and spoken feedback run in this browser. The ESP32 sends photos directly to your configured HTTPS backend."
+                          : "Use http://localhost:5000 on the laptop for microphone and speaker. The ESP32 upload address is the laptop’s Wi-Fi IP followed by :5000/upload."}
                       </p>
                       <h4>Supported objects</h4>
                       <div className="tags labels-list">
@@ -1853,7 +1985,7 @@ export default function App() {
                   <div className="save-bar">
                     <p>
                       <ShieldCheck size={16} />
-                      Changes are stored on this laptop.
+                      Changes are stored on {storagePlace}.
                     </p>
                     <button className="primary" disabled={busy}>
                       Save preferences
@@ -1890,6 +2022,42 @@ export default function App() {
           <CheckCircle2 size={18} />
           {toast}
         </div>
+      )}
+      {modal === "record" && status?.recording && (
+        <Modal title="Record someone familiar" close={() => {
+          run(async () => { await api(`/enrollment/${status.recording.id}`, "DELETE"); setModal(null); });
+        }}>
+          {error && <p className="error-banner" role="alert">{error}</p>}
+          <p>{status.recording.guidance}</p>
+          <p><strong>{status.recording.captured} / {status.recording.target} clear photos</strong></p>
+          {status.devices?.find((d: any) => d.id === status.recording.device_id)?.image_url &&
+            <div className="enrollment-preview"><img
+              src={status.devices.find((d: any) => d.id === status.recording.device_id).image_url + "?t=" + status.devices.find((d: any) => d.id === status.recording.device_id).last_seen}
+              alt="Camera view while recording a person" /></div>}
+          <div className="record-photos">
+            {Array.from({length: status.recording.captured}, (_, i) =>
+              <img key={i} src={`/api/enrollment/${status.recording.id}/photos/${i}`} alt={`Selected face photo ${i + 1}`} />)}
+          </div>
+          {status.recording.state === "awaiting_name" && (
+            <form onSubmit={(e) => { e.preventDefault(); run(() => saveRecording(recordName)); }}>
+              <h3>What name should I give this person?</h3>
+              <label>Name<input autoFocus required maxLength={80} value={recordName}
+                onChange={(e) => setRecordName(e.target.value)} placeholder="Person’s name" /></label>
+              <label>Relationship (optional)<input maxLength={120} value={recordRelationship}
+                onChange={(e) => setRecordRelationship(e.target.value)} placeholder="Daughter, brother, friend…" /></label>
+              <p className="fine">Saving the name approves these photos for recognition. You can edit the profile later in Familiar people.</p>
+              <div className="modal-actions">
+                <button className="primary" disabled={busy || !recordName.trim()}>Save person{status?.cloud ? "" : " on laptop"}</button>
+                <button type="button" className="secondary" disabled={busy || listening || !microphoneAvailable}
+                  onClick={sayRecordingName}><Mic size={16} /> {listening ? "Listening…" : "Say the name"}</button>
+                {listening && <button type="button" className="secondary"
+                  onClick={stopListening}>Stop listening</button>}
+              </div>
+              <p className="fine">Wait for the spoken prompt to finish. Then press “Say the name” and speak only the name into your microphone. If it fails, type the name to save.</p>
+            </form>
+          )}
+          {status.recording.state === "capturing" && <p className="fine">Rejecting blurred, dark and near-duplicate face photos. Keep the same person in view. Capture runs for up to 150 seconds.</p>}
+        </Modal>
       )}
       {modal === "person" && (
         <Modal title="Add someone familiar" close={() => setModal(null)}>
