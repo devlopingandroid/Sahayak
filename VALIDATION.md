@@ -1,3 +1,5 @@
+> **Historical local validation log.** Original entries below are retained. Read [docs/VALIDATION.md](docs/VALIDATION.md) for the dated cloud summary and current check commands.
+
 # Local verification
 
 Verified on 17 October 2026 on the connected Windows laptop.

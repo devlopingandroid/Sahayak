@@ -1,3 +1,5 @@
+> **Reading order:** the dated deployment verification below records completed observations. Later build/migration instructions and older pending notes are retained for reference; they are not a single current status checklist. See [current validation summary](../docs/VALIDATION.md) and [documentation index](../docs/INDEX.md).
+
 # Free cloud backend deployment
 
 Deployed target: **Northflank Developer Sandbox**, London, service `sahayak-backend` in project `default`, 0.2 shared vCPU / 512 MB, one instance. The attached 6 GB `sahayak-data` volume at `/data` is marked Free in the console. Delhi and Singapore require a paid upgrade. Keep the account and project on the free plan; do not upgrade or provision paid resources.

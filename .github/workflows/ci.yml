@@ -1,0 +1,66 @@
+name: SAHAYAK checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ci.yml'
+      - 'sahayak_cloud/**'
+      - 'tests/**'
+      - 'deploy/requirements-cloud.txt'
+      - 'deploy/export_cloud_data.py'
+      - 'Web Interface/**'
+  pull_request:
+    paths:
+      - '.github/workflows/ci.yml'
+      - 'sahayak_cloud/**'
+      - 'tests/**'
+      - 'deploy/requirements-cloud.txt'
+      - 'deploy/export_cloud_data.py'
+      - 'Web Interface/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            deploy/requirements-cloud.txt
+            tests/requirements-ci.txt
+      - name: Install test dependencies
+        run: python -m pip install -r tests/requirements-ci.txt
+      - name: Run isolated backend tests
+        run: python -m pytest tests -q
+
+  frontend:
+    name: Browser audio, TypeScript and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Web Interface
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: Web Interface/package-lock.json
+      - run: npm ci
+      - run: node --test tests/browser-audio.test.cjs
+      - run: npx tsc --noEmit -p tsconfig.app.json
+      - run: npm run build

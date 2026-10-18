@@ -1,0 +1,14 @@
+SAHAYAK — licensing status
+
+This file records licensing status only. It does not select or grant a new
+project-wide open-source license. Contributors and maintainers must agree on
+an appropriate license before representing the project as licensed under one.
+
+Third-party software and pretrained models retain their respective licenses.
+In particular, review the applicable Ultralytics, OpenCV Zoo and individual
+model terms before redistribution or commercialization. This notice does not
+replace or override any upstream license.
+
+References:
+https://github.com/ultralytics/ultralytics
+https://github.com/opencv/opencv_zoo

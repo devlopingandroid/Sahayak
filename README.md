@@ -25,6 +25,14 @@
 
 ---
 
+
+## Review SAHAYAK
+
+**Start here:** [3-minute demo walkthrough](docs/DEMO.md) · [Documentation index](docs/INDEX.md) · [Dated validation evidence](docs/VALIDATION.md) · [Roadmap](docs/ROADMAP.md) · [Automated checks](https://github.com/devlopingandroid/Sahayak/actions/workflows/ci.yml)
+
+<sub>Protected workflows require the configured caretaker account; the existing prototype video is linked above.</sub>
+
+
 ## Current cloud deployment
 
 > **Deployed camera → cloud AI → browser assistance.** The current system runs without a local laptop backend or a temporary tunnel.
