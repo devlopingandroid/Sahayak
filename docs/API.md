@@ -347,4 +347,4 @@ The save form uses `ssid`, `password`, `address`, `nonce` and optional `open=yes
 
 The setup page is normally reachable at the camera's LAN address or through supported mDNS at `http://sahayak-camera.local/`. During recovery, connect to the camera's protected access point and use `http://192.168.4.1/`. The setup password is separate from the dashboard password and appears on USB serial at 115200 baud.
 
-Related documentation: [Architecture](ARCHITECTURE.md), [Models](MODELS.md), [Installation](README.md).
+Related documentation: [Architecture](ARCHITECTURE.md), [Models](MODELS.md), [Installation](SETUP.md).
