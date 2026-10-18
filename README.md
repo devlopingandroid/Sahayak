@@ -6,19 +6,20 @@
 <img src="https://img.shields.io/badge/TRACK-Healthcare%20%26%20Wellbeing-91CAFF?style=for-the-badge&amp;labelColor=111827" alt="Healthcare and Wellbeing" />
 <img src="https://img.shields.io/badge/STAGE-Assistive%20Prototype-FFCE85?style=for-the-badge&amp;labelColor=111827" alt="Assistive prototype" />
 
+<h1>SAHAYAK</h1>
 <h3>Familiar faces. Useful memories. One next step.</h3>
 
 <p>A camera-assisted memory companion for people living with early-stage Alzheimer's disease or mild dementia,<br />with a caretaker connected to everyday assistance.</p>
 
 <a href="https://drive.google.com/file/d/1NvebiTkVziOd6F7CHSi9iMcKMkI8wJ-8/view?usp=sharing"><img src="https://img.shields.io/badge/%E2%96%B6-PROTOTYPE%20DEMO-9CFFCE?style=for-the-badge&amp;labelColor=111827" alt="Open existing prototype demo" /></a>
 &nbsp;
-<a href="#quick-start"><img src="https://img.shields.io/badge/%E2%86%92-RUN%20LOCALLY-91CAFF?style=for-the-badge&amp;labelColor=111827" alt="Run locally" /></a>
+<a href="https://sahayak-memory-assistant.vercel.app"><img src="https://img.shields.io/badge/%E2%86%92-LIVE%20DASHBOARD-91CAFF?style=for-the-badge&amp;labelColor=111827" alt="Open deployed SAHAYAK dashboard" /></a>
 &nbsp;
 <a href="#visual-library"><img src="https://img.shields.io/badge/%E2%96%A7-EXPLORE%20VISUALS-C9B1FF?style=for-the-badge&amp;labelColor=111827" alt="Explore project infographics" /></a>
 
 <br /><br />
 
-[The Idea](#the-idea) · [Experience](#the-experience) · [Architecture](#system-architecture) · [Tech Stack](#technology-stack) · [Setup](#quick-start) · [Roadmap](#what-comes-next)
+[The Idea](#the-idea) · [Experience](#the-experience) · [Architecture](#system-architecture) · [Tech Stack](#technology-stack) · [APIs](#api-reference) · [Get Started](#quick-start) · [Results](#development-and-verification) · [Roadmap](#what-comes-next)
 
 </div>
 
@@ -26,22 +27,26 @@
 
 ## Current cloud deployment
 
-- Dashboard: https://sahayak-memory-assistant.vercel.app
-- Backend: Northflank Developer Sandbox, London, one 512 MB instance with a persistent 6 GB volume. See [cloud deployment and verification](deploy/CLOUD.md).
-- The camera uploads directly over verified HTTPS; the laptop backend is not required. Wi-Fi and cloud settings survive power-bank restarts.
-- Cloud inference uses OpenCV YOLOv8n ONNX, YuNet and SFace. SQLite and photos remain on the persistent volume. The multi-stage Docker build keeps PyTorch out of the runtime image.
-- Cloud voice input/output uses the browser device's microphone and speaker. Local mode retains laptop speech services. No audio hardware is attached to the ESP32.
-- Checks covered live uploads, recognition, protected photos, AI replies and restart persistence. One live frame processed in about 929 ms; shared CPU and network conditions affect latency.
+> **Deployed camera → cloud AI → browser assistance.** The current system runs without a local laptop backend or a temporary tunnel.
 
-References: [Architecture](ARCHITECTURE.md), [API](API.md), [Models](MODELS.md). Credentials, Wi-Fi settings, databases, face photos and model weights are excluded from Git.
+| Component | Current deployment |
+|---|---|
+| **Live dashboard** | [sahayak-memory-assistant.vercel.app](https://sahayak-memory-assistant.vercel.app) — React frontend on Vercel |
+| **Backend & inference** | Flask + Waitress on one Northflank x86 service in London |
+| **Reported allocation** | Developer Sandbox: 0.2 shared vCPU, 512 MB RAM, one replica |
+| **Durable storage** | A 6 GB volume mounted at `/data` for SQLite, photos, settings and approved face samples |
+| **Camera transport** | Authenticated binary JPEG uploads directly to Northflank over certificate-verified HTTPS |
+| **Voice** | Microphone and spoken answers on the browser device; no audio hardware on the ESP32 |
 
+**Documentation baseline:** comprehensive project report dated **18 October 2026**, source checkpoint [`40ca2e6`](https://github.com/devlopingandroid/Sahayak/commit/40ca2e6). Deployment configuration and results below describe that checkpoint, rather than continuous availability guarantees.
 
+Explore [Architecture](docs/ARCHITECTURE.md), [APIs](docs/API.md), [Models](docs/MODELS.md) and [Cloud deployment](deploy/CLOUD.md). Optional local mode remains available for development and recovery. Credentials, private configurations, databases, face photos, migration archives and model weights stay outside Git.
 
 ## The idea
 
 **“Who is this?” · “Where was my phone last seen?” · “What should I do now?”**
 
-SAHAYAK connects these everyday questions to recorded observations and caretaker-approved information. An **ESP32-CAM captures images over Wi-Fi**; a **cloud backend (or optional laptop server) recognizes supported objects and enrolled people**, saves useful sightings and retrieves the relevant evidence when asked.
+SAHAYAK connects these everyday questions to recorded observations and caretaker-approved information. An **ESP32-CAM captures images over Wi-Fi**; the **deployed Northflank backend recognizes supported objects and enrolled people**, saves useful sightings and retrieves the relevant evidence when asked.
 
 The application brings together **visual memory, familiar-person introductions, guided routines, reassurance and acknowledged help requests**. Its purpose is to support recall and coordination; clinical effectiveness has not been established.
 
@@ -50,7 +55,7 @@ The application brings together **visual memory, familiar-person introductions, 
 | Focus | Our approach |
 |---|---|
 | **Healthcare & Wellbeing** | Assist people with memory difficulties and their caretakers. |
-| **A practical prototype** | ESP32-CAM capture, cloud or laptop inference and a browser-based interface. |
+| **A practical prototype** | ESP32-CAM capture, deployed cloud inference and a browser-based interface. |
 | **An inspectable answer** | Return the recorded time, available room source and original evidence. |
 | **A complete care interaction** | Observe → remember → recall → guide → request human support. |
 
@@ -60,7 +65,7 @@ The application brings together **visual memory, familiar-person introductions, 
 <tr>
 <td width="50%" valign="top">
 <h3>👥 Familiar-person introductions</h3>
-<p>Enroll someone with their preferred name, relationship and an approved introduction. Review photo samples before activating recognition.</p>
+<p>Capture a person first, then add their name and relationship. The newer workflow targets eight suitable photos; the caretaker can also upload, capture and review profile samples.</p>
 <blockquote><b>“Who is this?”</b><br />“This is Tanish, your son.”</blockquote>
 </td>
 <td width="50%" valign="top">
@@ -105,27 +110,45 @@ The application brings together **visual memory, familiar-person introductions, 
 <a href="https://raw.githubusercontent.com/devlopingandroid/Sahayak/main/Assets/images/SAHAYAK%20Memory%20Assistance%20Architecture.png"><img src="https://raw.githubusercontent.com/devlopingandroid/Sahayak/main/Assets/images/SAHAYAK%20Memory%20Assistance%20Architecture.png" alt="SAHAYAK memory assistance architecture" width="100%" /></a>
 
 ```text
-ESP32-CAM → Wi-Fi upload → Flask / Waitress on laptop
-                            ├─ YOLOv8n object detection
-                            ├─ YuNet face detection + SFace matching
-                            └─ SQLite records + persistent evidence photos
-                                         ↓
-                         React dashboard / patient view
-                            ├─ Natural Gemini conversation and grounded memory queries
-                            ├─ Browser speech in cloud mode; laptop SAPI locally
-                            └─ Approved Telegram sharing and help alerts
+ESP32-CAM ── verified HTTPS ──► Northflank: Flask + Waitress
+  │ POST /upload                  ├─ Bounded frame queue
+  │ GET /api/device-config        ├─ YOLOv8n ONNX / OpenCV DNN
+  │                               ├─ YuNet + SFace familiar-person matching
+  │                               ├─ SQLite + photos on persistent /data
+  │                               ├─ Gemini: bounded text conversation
+  │                               └─ Telegram notification worker
+  │                                              ▲
+  └─ Wi-Fi + portable power                      │ HTTPS /api proxy
+                                        Vercel: React dashboard
+                                                 ▲
+                                           Browser device
+                                    Text · microphone · spoken replies
 ```
 
-**Remote access:** Vercel serves the frontend and proxies API requests to Northflank over HTTPS. The camera uploads directly to Northflank, where models run and a persistent volume holds data. The optional local mode can use a Cloudflare tunnel. See [cloud deployment](deploy/CLOUD.md) and [setup guide](docs/SETUP.md).
+### Two connected journeys
 
-| Where it runs | What it does |
+**Remember:** camera JPEG → authenticated upload → queue → object/face inference → SQLite observation + evidence photo → dashboard and recall.
+
+**Ask:** typed question or browser transcript → `POST /api/query` → saved records and bounded Gemini context → validated answer/action → browser display and optional speech.
+
+The camera sends images **directly to Northflank**. Vercel hosts the UI and proxies browser `/api` requests; it is not the camera-upload destination. The backend does not open the remote user's microphone.
+
+| Where it runs | Responsibility |
 |---|---|
-| **ESP32-CAM** | Capture and upload; manage Wi-Fi settings and device configuration. |
-| **Backend host** | Northflank container or optional laptop: recognition, enrollment, SQLite, evidence, recall, routines and notifications. |
-| **Browser** | Caretaker dashboard and patient view. Cloud mode supports typed interaction and browser microphone/speech. |
-| **External services** | Gemini conversation, Google speech transcription, Telegram delivery, Vercel and Northflank; optional Cloudflare tunnel. |
+| **ESP32-CAM** | Capture fresh JPEGs, authenticate uploads, poll capture configuration and retain Wi-Fi settings in NVS. |
+| **Northflank** | Recognition, person enrollment, evidence, memory retrieval, routines, conversation and notifications. |
+| **Persistent `/data` volume** | SQLite, managed photos, settings and approved samples/embeddings. Pending queues and previews are not durable. |
+| **Vercel** | Publish the frontend and proxy authenticated browser API requests to the backend over HTTPS. |
+| **Browser device** | Caretaker and patient views, text input, supported speech recognition and speech synthesis. |
+| **External APIs** | Gemini for conversation; Telegram for selected messages/photos; browser-dependent speech services for transcription. |
 
-Cloud operation does not need the laptop backend. Microphone and speech feedback use the browser device. In local mode, keep the laptop backend running; laptop audio endpoints remain restricted to local access.
+One backend replica is used because SQLite, in-memory queues and enrollment sessions are designed around a single service. See [cloud deployment](deploy/CLOUD.md) for operation and recovery details.
+
+### Gemini conversation
+
+Gemini receives a question, bounded history and selected **text** records such as relationships, routines and observations. This path does not send raw photos, face embeddings, filesystem paths or secrets. Requests use the Interactions API with `store=false`; this setting is not a statement about every aspect of provider data handling.
+
+The backend validates returned actions and referenced records. Provider failure shows a fallback notice, while structured memory retrieval remains available where the saved evidence supports it. Gemini has no unrestricted SQL or web-search tool in this implementation.
 
 ## Technology stack
 
@@ -146,94 +169,114 @@ Cloud operation does not need the laptop backend. Microphone and speech feedback
 
 | Layer | Technology | Role |
 |---|---|---|
-| **Camera hardware** | AI Thinker ESP32-CAM | Image capture and Wi-Fi upload |
-| **Firmware** | Arduino C++ | Camera, capture interval, uploads and configuration polling |
-| **Wi-Fi setup** | ESP32 WebServer + Preferences/NVS | Browser-based provisioning with persistent settings |
-| **Backend** | Python + Flask | APIs, application services and memory queries |
-| **HTTP server** | Waitress | Serve Flask on the cloud host or laptop |
-| **Objects** | YOLOv8n ONNX/OpenCV (cloud), Ultralytics (local) | Detect supported categories |
-| **Faces** | OpenCV YuNet + SFace | Locate faces; compare approved enrolled embeddings |
-| **Image processing** | OpenCV + NumPy | Decode, rotate, resize and prepare images |
-| **Storage** | SQLite via Python `sqlite3` + local folders | Records, settings and evidence paths; photo files on disk |
-| **Voice input** | SpeechRecognition + PyAudio + Google speech | Browser speech recognition in cloud mode; laptop capture locally |
-| **Voice output** | Windows SAPI via pywin32 | Browser speech synthesis in cloud mode; SAPI/pyttsx3 locally |
-| **Frontend** | React + TypeScript + Vite | Caretaker and patient interfaces |
+| **Camera hardware** | AI Thinker ESP32-CAM | Capture JPEG images and upload over Wi-Fi |
+| **Firmware** | Arduino C++, ESP camera driver | Capture, upload, configuration polling and reconnect behavior |
+| **Wi-Fi setup** | ESP32 WebServer, DNSServer, Preferences/NVS | Password-protected local provisioning and persistent Wi-Fi/destination settings |
+| **Camera TLS** | WiFiClientSecure, bundled trust roots, NTP | Validate HTTPS certificates after clock synchronization |
+| **Backend** | Python + Flask | Authenticated APIs, application workflows and memory queries |
+| **HTTP server** | Waitress | Serve the deployed Flask application |
+| **Object detection** | YOLOv8n ONNX + OpenCV DNN | Detect supported object categories using a static 640-pixel model |
+| **Face recognition** | OpenCV YuNet + SFace | Detect faces and compare approved enrolled embeddings |
+| **Image processing** | OpenCV + NumPy | Decode, correct orientation, resize and prepare inputs |
+| **Storage** | SQLite via Python `sqlite3` + managed JPEG files | Persist structured records and evidence on `/data` |
+| **Conversation** | Gemini Interactions API | Natural questions grounded in bounded saved text context |
+| **Voice input** | Browser `SpeechRecognition` / `webkitSpeechRecognition` | User-activated transcription where supported |
+| **Voice output** | Browser speech synthesis | Read answers aloud and repeat them on the browser device |
+| **Frontend** | React + TypeScript + Vite | Caretaker dashboard and patient interface |
 | **UI** | Tailwind CSS, shadcn/ui, Framer Motion, Lucide | Components, styling, animation and icons |
-| **Notifications** | Telegram Bot API | Selected evidence and assistance notifications |
-| **Remote access** | Vercel + Northflank | Hosted UI, HTTPS backend and persistent storage; optional local tunnel |
-| **Conversation** | Gemini Flash / Flash-Lite | Natural questions grounded in bounded saved text records |
+| **Notifications** | Telegram Bot API | Selected evidence sharing and help notifications |
+| **Hosting** | Vercel + Northflank | Hosted frontend, HTTPS backend and persistent volume |
+| **Cloud packaging** | Multi-stage Docker build | Prepare models during build; keep PyTorch out of the inference runtime |
+
+Ultralytics/PyTorch prepare the cloud ONNX model during the build. Deployed inference uses OpenCV DNN. Windows SAPI and laptop microphone services belong to the optional local recovery/development mode.
+
+## API reference
+
+The camera uses device credentials; dashboard operations use caretaker sessions. These are the route families documented in the report; see [docs/API.md](docs/API.md) for route-specific contracts.
+
+| Route or family | Method | Purpose |
+|---|---|---|
+| `/api/health` | `GET` | Public availability check; model readiness is checked separately through status |
+| `/api/auth` | `GET`, `POST` | Authentication state and caretaker sign-in |
+| `/api/status` | `GET` | Device freshness, model readiness, counters and recording state |
+| `/api/settings` | `GET`, `PATCH` | Read settings and apply validated changes |
+| `/upload` | `POST` | Receive authenticated binary JPEG camera frames |
+| `/api/device-config` | `GET` | Return capture enablement and interval to the authenticated camera |
+| `/api/people` and sample routes | Route-specific | Manage people, relationships and enrollment samples |
+| `/api/events` and image routes | Route-specific | Retrieve/manage memories and protected evidence |
+| `/api/query` | `POST` | Answer typed or transcribed questions with optional bounded history |
+| `/api/routines` and item routes | `GET`, `POST`; item-specific | List/create routines and manage progress/settings |
+
+**Camera request:** `Content-Type: image/jpeg`, `X-Device-Token` and `X-Device-Id`. A `202` response means **queued**, not completed inference; `401` indicates invalid device authentication and `429` a full frame queue. Deployed uploads require authentication; legacy Base64 compatibility is not the normal transport.
+
+**Browser access:** cloud sessions use HttpOnly, SameSite Strict and Secure cookies. Writes require an approved origin, and evidence photos require caretaker authentication. Gemini and Telegram keys are write-only through the settings API. The API does not provide unrestricted permissive CORS.
+
+**Limits:** Flask requests up to 6 MiB; decoded images up to 4 MiB and 16 million pixels. Proxy limits can be lower. The frame queue holds three pending jobs; Telegram uses a separate 30-item notification queue. These limits are not throughput guarantees.
 
 ## Quick start
 
-The following instructions describe the optional local installation on a **Windows laptop**, an **ESP32-CAM** and a local network that allows the camera to reach the laptop. Use **Python 3.11 or 3.12**, Node.js/npm and a working microphone/speaker for local voice interaction.
+### 1 · Open the deployed dashboard
 
-### 1 · Clone and install
+Visit **[SAHAYAK live dashboard](https://sahayak-memory-assistant.vercel.app)** and sign in with the configured caretaker account. Cloud startup uses existing authentication or explicit private bootstrap configuration; there is no public default password.
 
-```powershell
-git clone https://github.com/devlopingandroid/Sahayak.git
-cd Sahayak
+You do not need to launch Flask, keep a laptop server running or start a Cloudflare tunnel for the deployed system.
 
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+### 2 · Power and check the camera
 
-python -m pip install -r sahayak_cloud/requirements.txt
-python sahayak_cloud/download_models.py
+1. Power the configured ESP32-CAM from USB or a suitable power bank.
+2. Keep its saved **2.4 GHz Wi-Fi** connected to the internet.
+3. Check the dashboard for a recent preview, fresh device timestamp and ready vision models.
+4. Review the room label, orientation, capture interval and capture/pause setting.
 
-cd "Web Interface"
-npm.cmd ci
-npm.cmd run build
-cd ..
-```
+USB supplies power/programming; images travel over Wi-Fi. The camera stores its Wi-Fi and cloud destination across restarts. Its direct backend destination is the **Northflank HTTPS endpoint**, not the Vercel website or a laptop LAN address.
 
-The model downloader retrieves the OpenCV face models and YOLOv8n weights. Internet is needed for installation and model downloads.
+### 3 · Try the assistance workflow
 
-### 2 · Start the application
+Add or review a familiar person, inspect a recent memory, ask a question and open its evidence. On a supported browser, activate the microphone and grant permission, then use repeat-aloud to hear the answer. Typed input remains available. Current conversational output is English; there is no always-listening wake word.
 
-```powershell
-.\start-sahayak.ps1
-```
+Configure a simple approved routine and demonstrate **Done → next step**, **Repeat** and **Help**. For Telegram, check delivery separately from caretaker acknowledgement.
 
-Open **http://localhost:5000**. On first use, create a caretaker password of at least ten characters; there is no installed default password. Keep the server window running.
+<details>
+<summary><b>👤 Capture first, name afterward</b></summary>
 
-### 3 · Connect the camera
+<br />
 
-1. Copy `firmware/config.example.h` to `firmware/SahayakCamera/config.h`.
-2. Set your Wi-Fi details, the HTTPS cloud backend (or laptop LAN address in local mode) and the device token from the dashboard. Keep this file private.
-3. In Arduino IDE, select **AI Thinker ESP32-CAM** and your actual serial port. Upload the sketch with the correct programming connections for your board.
-4. Open Serial Monitor at **115200 baud**. Successful uploads return **HTTP 202**, meaning the frame was queued for processing.
-5. Check the dashboard for fresh frames and ready model status. Disable token-free legacy compatibility after the updated firmware works.
+The newer homepage recording workflow targets **eight** clear, varied face photos. At the 150-second timeout it may accept seven suitable samples. Frames are checked for a single sufficiently large face, exposure, sharpness, variation and consistency before the user provides a name.
 
-USB supplies power/programming; image transport uses Wi-Fi. Use the laptop's LAN address on the camera, not `localhost`. A fixed camera can use a room label; a wearable camera needs a verified location source before reporting a room.
+The existing profile workflow also supports uploaded/captured samples and the earlier guided collection of up to six photos for review. A complete new recording session was checked locally; a fresh full cloud eight-photo enrollment remains a separate validation item in the report.
+
+</details>
 
 <details>
 <summary><b>📶 Change camera Wi-Fi without reflashing</b></summary>
 
 <br />
 
-With the updated firmware, open **Settings → Camera & recognition → Open esp32-cam Wi-Fi setup**. The setup link becomes available after a frame arrives. The camera also supports `http://sahayak-camera.local/` where mDNS is available.
+Use the camera's local setup page from a device on the same reachable network. Where supported, the dashboard setup link or `http://sahayak-camera.local/` opens that page. Sign in with the camera's unique setup password, which is separate from the dashboard password.
 
-Sign in as `caretaker` with the camera's unique setup password, printed on Serial Monitor. This is separate from the dashboard password. Settings are stored in NVS and survive restarts.
+If station Wi-Fi is unavailable for 30 seconds, join the password-protected `SAHAYAK-Setup-xxxxxx` recovery hotspot and open `http://192.168.4.1/`. Save the new 2.4 GHz Wi-Fi and the correct HTTPS cloud backend destination. Settings persist in Preferences/NVS.
 
-If the camera cannot connect for 30 seconds, the firmware provides a `SAHAYAK-Setup-xxxxxx` recovery hotspot. Join using its setup password, open `http://192.168.4.1/` and save the new **2.4 GHz Wi-Fi** and reachable laptop server address.
-
-The setup page uses local HTTP and is intended for trusted networks. The camera does not automatically discover a changed laptop IP. Keep a private copy of its generated setup password; losing it requires USB recovery.
+The setup page uses local HTTP on a trusted network. A public cloud dashboard cannot bypass private-network routing to reach the camera. Keep its setup password privately; USB serial recovery remains available when local access is lost.
 
 </details>
 
 <details>
-<summary><b>🌐 Optional hosted frontend</b></summary>
+<summary><b>🛠️ Deploy your own installation or use local recovery</b></summary>
 
 <br />
 
-Follow [deploy/README.md](https://github.com/devlopingandroid/Sahayak/blob/main/deploy/README.md) to configure your Cloudflare client, Vercel project and private remote-access settings. After configuration:
+Start with [deploy/CLOUD.md](deploy/CLOUD.md) for the deployed architecture and [docs/SETUP.md](docs/SETUP.md) for development setup. Clone the project if you are maintaining or deploying it:
 
 ```powershell
-python start-remote-sahayak.py
+git clone https://github.com/devlopingandroid/Sahayak.git
+cd Sahayak
 ```
 
-The launcher starts the backend if needed, creates a temporary tunnel and updates the Vercel API proxy. Wait for deployment to complete. The temporary address changes after restart, and the laptop, tunnel and server must stay running.
+Provision the backend and persistent `/data` volume, configure private authentication/provider settings, deploy the frontend API proxy, then install camera firmware targeting your backend. Keep one backend replica until storage and queue coordination are redesigned. Model preparation belongs to the multi-stage build; private data and credentials must stay out of its context.
 
-Use `http://localhost:5000/` for laptop voice interaction. Remote browsers support typed queries; remote requests cannot operate the laptop microphone or speaker.
+For camera programming, use the firmware example configuration and the **AI Thinker ESP32-CAM** board profile. Use your actual serial port, keep private configuration out of Git and monitor upload status at 115200 baud. HTTPS operation requires working NTP and certificate validation.
+
+The former Windows backend, local audio services and temporary tunnel are retained for optional development/recovery. They are not prerequisites for the live cloud installation. Follow the deployment/setup guides for the mode you intend to run.
 
 </details>
 
@@ -242,9 +285,9 @@ Use `http://localhost:5000/` for laptop voice interaction. Remote browsers suppo
 | Screen | What you can do |
 |---|---|
 | **Overview** | Inspect the latest frame, connection freshness, model state and activity counts. |
-| **Familiar people** | Add profiles; upload, capture or collect guided samples; review and approve them. |
+| **Familiar people** | Capture-first recording, profiles, relationships, introductions and reviewed enrollment samples. |
 | **Memory timeline** | Filter sightings, inspect evidence, correct labels, confirm records or hide them. |
-| **Ask SAHAYAK** | Search by text; use the laptop microphone and speaker locally. |
+| **Ask SAHAYAK** | Ask by text or supported browser microphone; hear/repeat answers through browser speech synthesis. |
 | **Daily routines** | Configure steps and record Done, Repeat or Help actions. |
 | **Care & reassurance** | Manage approved answers, expiry, assistance acknowledgement and a confirmed daily recap. |
 | **Patient view** | Use larger controls for introductions, object recall, next activity and help. |
@@ -263,7 +306,7 @@ All 14 project infographics below come from this repository's [`Assets/images`](
 
 <h4>Hardware setup</h4>
 <a href="https://raw.githubusercontent.com/devlopingandroid/Sahayak/main/Assets/images/SAHAYAK%20Hardware%20Setup%20Infographic.png"><img src="https://raw.githubusercontent.com/devlopingandroid/Sahayak/main/Assets/images/SAHAYAK%20Hardware%20Setup%20Infographic.png" alt="Hardware setup" width="100%" /></a>
-<p><sub>Camera, Wi-Fi and the laptop processing environment.</sub></p>
+<p><sub>Original hardware concept; current recognition runs on Northflank and voice runs on the browser device.</sub></p>
 
 <h4>Recognition pipeline</h4>
 <a href="https://raw.githubusercontent.com/devlopingandroid/Sahayak/main/Assets/images/SAHAYAK%20AI%20Recognition%20Pipeline.png"><img src="https://raw.githubusercontent.com/devlopingandroid/Sahayak/main/Assets/images/SAHAYAK%20AI%20Recognition%20Pipeline.png" alt="Recognition pipeline" width="100%" /></a>
@@ -271,7 +314,7 @@ All 14 project infographics below come from this repository's [`Assets/images`](
 
 <h4>From frame to stored record</h4>
 <a href="https://raw.githubusercontent.com/devlopingandroid/Sahayak/main/Assets/images/SAHAYAK%20Hardware-to-Software%20Data%20Flow.png"><img src="https://raw.githubusercontent.com/devlopingandroid/Sahayak/main/Assets/images/SAHAYAK%20Hardware-to-Software%20Data%20Flow.png" alt="From frame to stored record" width="100%" /></a>
-<p><sub>Conceptual flow; current firmware uses binary JPEG, with legacy Base64 support.</sub></p>
+<p><sub>Conceptual flow; current firmware sends binary JPEG directly to the cloud over authenticated HTTPS.</sub></p>
 
 </details>
 
@@ -339,17 +382,48 @@ All 14 project infographics below come from this repository's [`Assets/images`](
 
 ## Memory, privacy and trust
 
-**Recognition answers a limited question.** YOLO identifies supported categories; it does not prove that a phone belongs to a particular person. YuNet detects faces, and SFace compares approved references. Similarity scores are not calibrated identity probabilities. A last-seen event does not establish current position, an action or medication ingestion.
+**Recognition describes observations.** YOLO detects supported categories, not ownership of a specific person's belongings. YuNet detects faces; SFace compares approved references. Similarity scores are not calibrated identity probabilities. A last-seen record does not prove current location, a completed action or medication ingestion. Room labels are configured, not measured GPS or indoor positioning.
 
-**Storage follows deployment mode.** Cloud records and photos live on the persistent Northflank `/data` volume. Local mode uses `sahayak_cloud/data/sahayak.sqlite3` and `data/images`. SQLite uses WAL mode. Back up the database and photos together; do not commit either.
+**Durable cloud memory has a clear boundary.** SQLite, photos, settings and reviewed embeddings live on Northflank's `/data` volume. SQLite uses WAL mode. Back up the database and referenced photos together. Previews, pending frames and active in-memory sessions do not survive restart.
 
-**External services remain visible.** Google speech processes voice externally; Telegram receives selected information; cloud access carries data through Northflank and Vercel; the optional local tunnel also uses Cloudflare. The system is not fully offline. Cloud speech uses browser APIs; local Windows speech uses installed SAPI voices. The current interface uses English.
+| Destination | Data used by the implemented path |
+|---|---|
+| **Northflank** | Camera JPEGs, profiles, embeddings, observations, routines and private runtime settings |
+| **Vercel** | Frontend requests and proxied API responses, including authorized evidence views |
+| **Gemini** | Questions, bounded history and selected text records; no raw photos/embeddings in the conversation path |
+| **Speech service** | Audio or recognition-related data according to the browser's selected speech service |
+| **Telegram** | Explicitly requested help messages or selected evidence |
 
-**Controls reflect the current prototype.** There is one patient profile and one caretaker login. Evidence requires authenticated access, camera uploads use device credentials, and settings control capture and sharing. Telegram settings live in the private backend database; database values do not have application-level encryption. Hiding a memory is not secure erasure.
+**Current controls:** one patient profile and one caretaker login, rate-limited sign-in, protected evidence, device credentials, approved write origins and secure cloud cookies. Camera HTTPS validates certificates. Secrets and private runtime files remain outside Git.
 
-Some privacy infographic labels describe intended controls rather than current implementation—for example, multiple roles, environment-variable token storage or internet being used only for Telegram. The notes above take precedence.
+**Current gaps:** SQLite secret values do not have application-level encryption; hiding records is not secure erasure. A complete multi-role account system, formal consent registry, comprehensive audit product and verified secure-deletion workflow are not implemented. Hosting-account and backup access remain important.
+
+The retained infographics are design illustrations. Older labels about local-only processing, microphones on the camera, multiple roles or internet being used only for Telegram do not describe the current deployment. The implementation text and linked documentation describe the current system.
 
 ## Development and verification
+
+### Reported engineering results
+
+The following results come from the **18 October 2026 report**. They were not rerun as part of this README update.
+
+| Check | Recorded result | Scope |
+|---|---|---|
+| **Backend regression suite** | 57 tests passed | Tested workflows, validation, access control, enrollment and cloud behavior |
+| **Browser audio tests** | 3 tests passed | Transcript, permission failure, cancellation and repeated listening paths |
+| **Frontend** | TypeScript checks and Vite build passed | Compilation and production asset generation |
+| **ONNX parity** | 16 saved images | Matching counts/labels; score differences below 0.02 with equal preprocessing |
+| **Live camera check** | 37 new cloud frames; no reported inference errors | One hardware verification period |
+| **Latest live frame** | About 929 ms inference + 5 ms queue | Single frame; not complete end-to-end transport latency |
+| **Cloud saved-image inference** | About 1.6 s; 253 MB peak memory | Separate test process on shared hosting |
+| **AI through Vercel** | About 1.6–2.4 s | Successful example replies with the selected Flash-Lite configuration |
+| **Restart persistence** | Records, photos and AI configuration checked after restart | Durable data persisted; queues/previews are not durable |
+| **Access boundaries** | Protected image returned JPEG when signed in and `401` without authentication; untrusted write origin rejected | Specific recorded access checks |
+
+Network conditions, TLS setup, shared CPU and provider quotas affect timing. These observations are not population recognition accuracy, continuous availability, clinical benefit or a guaranteed response time. Final-device browser voice, a fresh complete cloud eight-photo enrollment, battery runtime, long-duration load and every Telegram delivery case remain separate checks.
+
+### Maintainer checks
+
+With development dependencies installed, the existing workflow includes:
 
 ```powershell
 python -m pytest tests -q
@@ -362,21 +436,23 @@ npm.cmd run build
 npm.cmd run dev
 ```
 
-See [VALIDATION.md](https://github.com/devlopingandroid/Sahayak/blob/main/VALIDATION.md) for the project's existing verification record and remaining hardware/user checks. Reproduce checks in your own environment; a saved-image replay or model benchmark is not a measurement of live patient benefit.
+See [VALIDATION.md](VALIDATION.md) and [deploy/CLOUD.md](deploy/CLOUD.md) for verification and deployment context. After a release, check health, authenticated model status, recent camera inference, protected evidence and persistence rather than treating an accepted upload as a completed recognition.
 
 Review upstream [Ultralytics](https://github.com/ultralytics/ultralytics) and [OpenCV Zoo](https://github.com/opencv/opencv_zoo) model licenses before redistribution or commercialization.
 
 ## What comes next
 
-| Direction | Next engineering question |
+| Direction | Next work |
 |---|---|
-| **Personal belongings** | How can reviewed references or tags distinguish one person's item from a generic category? |
-| **Location** | How can wearable room or outdoor location be established reliably? |
-| **Voice access** | How can offline speech and browser-side voice expand access? |
-| **Usability** | Which interactions work well for patients and caretakers in structured evaluation? |
-| **Deployment** | How should permanent remote access, operational controls and multiple profiles be introduced? |
+| **Recognition evidence** | Evaluate consented, representative images and publish false-match/missed-detection results. |
+| **Accessible interaction** | Test patient/caretaker usability, final-device speech, proper-name correction and predictable confirmations. |
+| **Privacy & recovery** | Add audited roles, controlled export/deletion, encrypted secret handling and verified backup restoration. |
+| **Personal belongings & location** | Evaluate tags, OCR and reliable room localization as separate features with their own evidence. |
+| **Cloud operations** | Add observability, load testing and a sustainable hosting plan; shared Sandbox resources and API quotas constrain availability. |
 
-OCR, native mobile support, a physical help button, life-story albums and outdoor tracking remain extensions. The current prototype does not diagnose dementia, verify medication ingestion or establish clinical effectiveness.
+Native mobile support, a physical help button, life-story albums and outdoor tracking remain extensions. The ESP32 installation has no microphone, speaker, GPS or inertial sensor. All-day battery runtime has not been benchmarked.
+
+SAHAYAK is an **assistive prototype**. It does not diagnose dementia, verify medication ingestion, provide validated fall detection or establish an emergency-response service or clinical effectiveness.
 
 ---
 
