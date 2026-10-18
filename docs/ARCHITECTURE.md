@@ -202,4 +202,4 @@ The camera prints its unique setup password on USB Serial Monitor at 115200 baud
 
 Sightings describe past observations, not guaranteed current positions. Room labels are configured or caretaker-entered rather than GPS or inferred wearable location. Generic object detection cannot prove ownership or distinguish identical phones. Face matching depends on reviewed samples and image quality. The application cannot infer medication ingestion from camera images. Software tests do not establish clinical benefit.
 
-Related documentation: [Model pipeline](MODELS.md), [API reference](API.md), [Setup guide](README.md).
+Related documentation: [Model pipeline](MODELS.md), [API reference](API.md), [Setup guide](SETUP.md).
